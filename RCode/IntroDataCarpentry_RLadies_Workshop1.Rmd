@@ -1,7 +1,0 @@
----
-title: "Intro Data Carpentry: RLadies Workshop 1"
-author: "Molly Caldwell"
-date: "2022-11-17"
-output: html_document
----
-
