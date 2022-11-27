@@ -1,0 +1,195 @@
+---
+title: "Intro Data Carpentry: RLadies Workshop 1"
+author: "Molly Caldwell"
+date: "2022-11-17"
+output: html_document
+---
+
+#Load data and packages
+
+```{r}
+#load packages
+library(moveVis)
+library(move)
+library(sf)
+library(tidyverse)
+library(raster)
+```
+
+```{r, setup}
+#set working directory- set this to the directory you have the code/nlcd data saved
+knitr::opts_knit$set(root.dir = "~/UWyo/RLadies/workshop1_introR/")
+```
+
+We are using a GPS collar fisher data set from New York pulled from movebank.
+
+```{r}
+#load gps data
+loginStored <- movebankLogin(username="MovebankWorkshop", 
+                             password="genericuserforthisexercise") #save generic login for movebank
+
+fisher.move <- getMovebankData(study = "Martes pennanti LaPoint New York",
+                               login = loginStored) #load fisher data set using stored login
+
+fisher.dat <- as(fisher.move, "data.frame") #set data as data frame to work with
+
+head(fisher.dat) #visualize data
+```
+
+For landcover data, we are using an NLCD [national landcover database] layer (2011) for New York, cropped to the study area.
+Download this file (nlcd_ny_2011_crop.tif) and the NLCD_key.csv from the data folder at this drive link: https://drive.google.com/drive/folders/1g_SiqWYy9ZZUMoA0p6Ae98fd94l8DURh?usp=sharing
+If you'd like to know how it was cropped, you can ask Molly- molly.caldwell@uwyo.edu.
+
+```{r}
+#load nlcd data, change folder names/directory to match yours
+nlcd <- raster("./Data/nlcd_ny_2011_crop.tif")
+```
+
+#Initial data cleaning
+We want to select only the variables we will be working with and check them for missing values (NAs).
+
+```{r}
+#select the variables you want from the data
+fisher.dat <- fisher.dat %>% 
+  select(c(tag_id, location_lat, location_long, timestamp, comments, sex))
+
+#check for NAs
+fisher.dat %>%
+  map(is.na) %>% #map runs functions across each variable (column)
+  map(sum) #0 means there is no NAs in that column
+
+```
+
+#Extract nlcd raster values
+We are going to convert the fisher.sf dataframe into a spatial (sf) object in order to extract our nlcd raster layer values to each fisher's GPS points.
+
+```{r}
+#create sf object from fisher.dat (dataframe)
+fisher.sf <- st_as_sf(fisher.dat, coords = c("location_long", "location_lat"),
+                      crs = st_crs(fisher.move))
+
+#extract nlcd to each fisher point
+fisher.sf$nlcd <- raster::extract(nlcd, st_transform(fisher.sf, 
+                                                     crs = projection(nlcd)))
+
+#look at the unique nlcd extracted values
+unique(fisher.sf$nlcd)
+
+```
+
+#Joining nlcd values with the habitat key
+The nlcd values extracted are not very helpful in the current format (coded numbers), so we are going to join the extracted values data set with the NLCD code key to add the land cover type names associated with the NLCD codes.
+
+You can download the code key (NLCD_key.csv) from the Data folder at the drive link:
+https://drive.google.com/drive/folders/1g_SiqWYy9ZZUMoA0p6Ae98fd94l8DURh?usp=sharing
+
+```{r}
+#load in the ncld code key- change directory/folder to match where you saved your NLCD_key.csv
+nlcd_key <- read.csv("./Data/NLCD_key.csv")
+
+#left join the fisher GPS data (with nlcd extracted values) with the key
+##remember that left join will keep all the rows in the first dataset (fisher.sf) and only matching variables from the second dataset (NLCD_key)
+fisher.join <- left_join(fisher.sf, nlcd_key, by = c("nlcd" = "Code")) 
+#because the NLCD codes (key matching variable) are named differently in the datasets, we need to use the syntax by = c("key variable name dataset 1" = "key variable name dataset 2")
+
+#take a look at the head of the newly joined dataset, notice the new column Classification
+head(fisher.join)
+```
+
+#Further data cleaning
+Now, we are going to rename some of the nlcd variables to make it easier to understand later on.
+
+```{r}
+#rename nlcd and Classification, notice that rename takes the argument new name = old name
+fisher.join <- fisher.join %>% 
+  rename("nlcd_code" = "nlcd", "nlcd_covertype" = "Classification")
+
+#sometimes rename is overridden by other packages, so if you get errors, use dplyr::rename()
+
+#check the correct columns were renamed
+head(fisher.join)
+```
+
+#Extracting strings and regular expressions
+If you look at the fisher dataset, there is a comments variable that is a long character string with a lot of information in it including the animal's name, age class, reproductive status, weight, and GPS info. Long strings are hard to work with in R, but luckily we can use separate and the stringr package (part of tidyverse) for string manipulation.
+
+We are going to extract information from the comments strings to separate variables to make them easier to work with. For more information on the pattern syntax used by separate and str (regular expressions), see https://rdrr.io/cran/stringi/man/about_search_regex.html
+
+```{r}
+#look at the unique values for comments
+unique(fisher.join$comments)
+```
+
+```{r}
+#Extract the age class, weight, and name from the comments to new columns
+fisher.join <- fisher.join %>% 
+  mutate(age_class = str_extract(comments, pattern = "adult|subadult"))  %>% #this pattern extracts adult OR subadult
+  mutate(weight_kg = str_extract(comments, pattern = "\\d+\\.*\\d*")) %>%  #this pattern extracts any decimal numbers from the string
+  separate(comments, into = "name", sep = "; |, ", extra = "drop")  #this separates out the first portion of the comments before ; or , and then drops the rest
+#all other parts of the comments column will be dropped (extra = "drop")
+
+#look at output
+head(fisher.join)
+```
+
+#Summarizing data
+
+We can quickly summarize and explore our data using tidyverse functions and piping.
+These next sections will introduce a few common functions, but there are many more- see R for Data Science book for a good intro. https://r4ds.had.co.nz/index.html
+
+##How many collared individuals per age class and sex?
+
+```{r}
+as.data.frame(fisher.join) %>% #convert fisher.join to data frame to drop geometry
+  distinct(tag_id, .keep_all = TRUE) %>%  #take only 1st row per individual, to prevent repeat counting of individuals
+  count(sex, age_class) #count number of individuals per sex and age class
+```
+
+##What habitats are adult males using?
+
+We are going to summarize the average proportion of points adult males spend in each land cover type. While there are many better ways to analyze habitat use, this provides a quick preliminary summary to inform any later analyses.
+
+```{r}
+#step 1: create a dataset with only adult males
+fisher.male <- fisher.join %>%
+  filter(sex == "m" & age_class == "adult") #filter allows you to select data based on variable values; you can also use regular expressions and %in% to filter by multiple values
+
+#Step 2: create a summary of the proportion of points per cover type per individual
+male_nlcd_pts <- as.data.frame(fisher.male) %>% #convert to data frame to drop geometry
+  group_by(nlcd_covertype, tag_id) %>% #use group by to summarize by each cover type and individual
+  summarize(num_pts = n(), .groups = "keep") %>% #summarize number of points per cover type and individual
+  ungroup() %>% #un-group by cover type and id
+  group_by(tag_id) %>% #group by only id to summarize proportion points per cover type per individual (because we want to get total sum of points per individual)
+  mutate(prop_pts = num_pts/sum(num_pts))
+
+#view output
+male_nlcd_pts  
+```
+
+```{r}
+#Step 3: summarize average and standard deviation of proportion of points per cover type
+avg_prop_summ <- male_nlcd_pts %>% #take summarized dataset from step 2
+  group_by(nlcd_covertype) %>% #group by cover type
+  summarize(avg_prop = mean(prop_pts), sd_prop = sd(prop_pts))
+  
+#View output
+avg_prop_summ
+```
+
+```{r}
+#graph output (average proportion points per cover type for adult males)
+ggplot(avg_prop_summ, aes(x = nlcd_covertype, y = avg_prop, 
+                          color = nlcd_covertype)) +
+  geom_errorbar(aes(ymin = (avg_prop - sd_prop), ymax = (avg_prop +
+                    sd_prop)), width = 0.2) +
+  geom_point() +
+  xlab("Cover Type") +
+  ylab("Average proportion of points") +
+  ggtitle("Male fisher habitat use") +
+  theme(legend.position = "none") + #no legend
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1)) #rotate x-axis labels vertically
+```
+
+
+
+
