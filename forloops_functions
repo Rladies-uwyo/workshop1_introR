@@ -1,0 +1,166 @@
+# author - Heather N Abernathy 
+# date - 11/28/2022
+# purpose - example/workshop code ~ for loops and functions
+
+# important - please note, you will need at least R version 4.2.2
+
+# ------------
+# packages 
+# ------------
+ #install.packages('sf', dependencies = T) # should have these downloaded
+library(moveVis)
+library(move)
+library(sf)
+
+# check your package versions:
+apply(data.frame('moveVis','move','sf'), 
+      MARGIN = 2, 
+      FUN =  function(x){packageVersion(x)})  
+
+# -------------
+# example data 
+# ----------------------------------------------------------------------------------------------------------------
+
+loginStored <- movebankLogin(username="MovebankWorkshop", password="genericuserforthisexercise")
+
+fisher.move <- getMovebankData(study = "Martes pennanti LaPoint New York",
+                               login = loginStored)
+
+fisher.dat <- as(fisher.move, "data.frame")
+
+# ----------------------------------------------------------------------------------------------------------------
+# explore data
+# ----------------------------------------------------------------------------------------------------------------
+
+# more about the data: https://www.datarepository.movebank.org/bitstream/handle/10255/move.329/README.txt?sequence=2
+
+head(fisher.dat)
+tail(fisher.dat)
+str(fisher.dat)
+
+table(fisher.dat$trackId)
+
+# ----------------------------------------------------------------------------------------------------------------
+# for loops
+# ----------------------------------------------------------------------------------------------------------------
+
+# most basic form of for loops, from slides:
+
+for(i in 1:5){
+  
+  print(i)
+  
+}
+
+# more advanced use of for loops using real data -
+
+# split the data into chunks that we can iterate over:
+fl <- split(fisher.dat, fisher.dat$trackId)
+
+
+# setup a blank dataframe to fill within each iteration: 
+fisher.summary <- data.frame(trackID = unique(fisher.dat$trackId), 
+                             dateRange = NA, 
+                             numberLocs = NA)
+
+
+# optional: set up plotting space based on the parameters of our
+# toy dataset: 
+par(mfrow=c(nrow(fisher.summary)/4,nrow(fisher.summary)/2))
+
+
+# the for loop for our iterations, where i is our iterator stand-in:
+
+for(i in 1:length(fl)){
+  
+  f.temp <- fl[[i]]
+  
+  fisher.summary$dateRange <- paste0(min(f.temp$timestamp), ' -- ', max(f.temp$timestamp))
+  
+  fisher.summary$numberLocs <- nrow(f.temp)
+  
+  sink("nul") # suppresses output we dont need
+  
+  print( suppressWarnings(hist(f.temp$timestamp, breaks = nrow(f.temp), plot = T, 
+                               main = paste0(unique(f.temp$trackId)), xlab = 'timestamp')))
+  
+  sink() # undo suppression of output we dont need
+  
+}
+
+# ------------------
+# debugging a loop - 
+# ------------------
+
+# setup a blank dataframe to fill within each iteration: 
+fisher.summary <- data.frame(trackID = unique(fisher.dat$trackId), 
+                             dateRange = NA, 
+                             numberLocs = NA)
+
+
+# optional: set up plotting space based on the parameters of our
+# toy dataset: 
+par(mfrow=c(nrow(fisher.summary)/4,nrow(fisher.summary)/2))
+
+
+# the for loop for our iterations, where i is our iterator stand-in. now it does not work
+# correctly 
+
+for(i in 1:length(fl)){
+  
+  f.temp <- fl[[i]]
+  
+  fisher.summary$dateRange <- paste0(f.temp$timestamp, ' -- ', max(f.temp$timestamp))
+  
+  fisher.summary$numberLocs <- nrow(f.temp)
+  
+  sink("nul") # suppresses output we dont need
+  
+  print( suppressWarnings(hist(f.temp$timestamp, breaks = nrow(f.temp), plot = T, 
+                               main = paste0(unique(f.temp$trackId)), xlab =   )))
+  
+  sink() # undo suppression of output we dont need
+  
+}
+
+# ----------------------------------------------------------------------------------------------------------------
+# functions
+# ----------------------------------------------------------------------------------------------------------------
+
+# a very simple function
+my_function <- function() { 
+  print("Hiya!")
+}
+
+# run a function with no arguments 
+my_function()
+
+# see the inter workings of this function or any function
+my_function
+sum
+
+# function similar in functionality to the loop we generated above
+fisher_fxn <- function(x){
+  
+  fisher.summary <- data.frame(trackID = unique(x$trackId), 
+                               dateRange = NA, 
+                               numberLocs = NA)
+  
+  fl <- split(x, x$trackId)
+  
+  for(i in 1:length(fl)){
+    
+    f.temp <- fl[[i]]
+    
+    fisher.summary$dateRange <- paste0(min(f.temp$timestamp), ' -- ', max(f.temp$timestamp))
+    
+    fisher.summary$numberLocs <- nrow(f.temp)
+    
+  }
+  
+  return(fisher.summary)
+  
+  
+}
+
+fisher.summary <- fisher_fxn(fisher.dat)
